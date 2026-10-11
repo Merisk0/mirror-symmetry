@@ -43,9 +43,12 @@ jobs:
       - name: Build exe
         run: python scripts/build_exe.py
       - name: Verify exe
+        shell: pwsh
         run: |
-          dist\MirrorSymmetry.exe --selftest
-          type selftest_report.txt
+          $p = Start-Process -FilePath "dist\MirrorSymmetry.exe" -ArgumentList "--selftest" -Wait -PassThru
+          Write-Host "selftest exit code: $($p.ExitCode)"
+          Get-Content selftest_report.txt
+          if ($p.ExitCode -ne 0) { throw "exe selftest failed" }
       - uses: actions/upload-artifact@v4
         with:
           name: MirrorSymmetry-exe
