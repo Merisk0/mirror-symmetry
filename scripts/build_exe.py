@@ -32,7 +32,9 @@ def make_icon() -> Path | None:
         if path and path.exists():
             return path
     except Exception as exc:
-        import traceback\n        print("[!] icon generation failed, using default icon")\n        traceback.print_exc()
+        import traceback
+        print("[!] icon generation failed, using default icon")
+        traceback.print_exc()
     return None
 
 
