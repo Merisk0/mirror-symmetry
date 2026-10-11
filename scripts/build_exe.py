@@ -11,6 +11,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Windows CI 的控制台不是 UTF-8，中文 print 会抛 UnicodeEncodeError
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 NAME = "MirrorSymmetry"
@@ -25,7 +32,7 @@ def make_icon() -> Path | None:
         if path and path.exists():
             return path
     except Exception as exc:
-        print(f"[!] 图标生成失败，将使用默认图标：{exc}")
+        import traceback\n        print("[!] icon generation failed, using default icon")\n        traceback.print_exc()
     return None
 
 
@@ -72,3 +79,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
