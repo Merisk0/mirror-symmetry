@@ -19,6 +19,8 @@ DEFAULTS = {
     "play": True,
     "geometry": "",
     "last_dir": "",
+    "watermark": True,
+    "watermark_text": "merisk.top",
     "window_max": False,
 }
 
