@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from PIL import Image  # noqa: E402
+from PIL import Image, ImageChops  # noqa: E402
 
 from mirror_symmetry import core  # noqa: E402
 
@@ -232,6 +232,68 @@ class TestHelpers(unittest.TestCase):
         gif_out = Image.open(out2 / "b.gif")
         self.assertEqual(gif_out.size, (120, 60))
         self.assertEqual(gif_out.n_frames, 3)
+
+
+class TestWatermark(unittest.TestCase):
+    """隐藏水印：不可见 + 能读回 + 篡改可检出。"""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="mswm_"))
+
+    def _frames(self, count=3):
+        return [make_image(120, 90, seed=i + 1) for i in range(count)]
+
+    def test_payload_roundtrip_and_tamper(self):
+        frames = self._frames()
+        payload = core._wm.make_payload("merisk.top", frames, [100] * len(frames))
+        info = core._wm.parse_payload(payload)
+        self.assertIsNotNone(info)
+        self.assertEqual(info["text"], "merisk.top")
+        broken = payload[:-1] + ("0" if payload[-1] != "0" else "1")
+        self.assertIsNone(core._wm.parse_payload(broken))
+
+    def test_lsb_is_invisible(self):
+        frames = self._frames(1)
+        payload = core._wm.make_payload("merisk.top", frames)
+        stego = core._wm.embed_lsb(frames[0], payload)
+        diff = ImageChops.difference(stego.convert("RGBA"), frames[0].convert("RGBA"))
+        hist = diff.histogram()
+        worst = max(i for i in range(256) for c in range(4) if hist[c * 256 + i])
+        self.assertLessEqual(worst, 1)
+        self.assertEqual(core._wm.extract_lsb(stego), payload)
+
+    def test_formats_carry_watermark(self):
+        frames = self._frames(3)
+        payload_text = "merisk.top"
+        cases = [(".png", "PNG"), (".bmp", "BMP"), (".gif", "GIF"),
+                 (".jpg", "JPEG"), (".webp", "WEBP")]
+        for ext, fmt in cases:
+            path = self.tmp / f"wm{ext}"
+            if fmt == "GIF":
+                core.save_gif(str(path), frames, [100] * 3, 0,
+                              watermark=core._wm.make_payload(payload_text, frames, [100] * 3))
+            elif fmt == "WEBP":
+                core.save_webp(str(path), frames, [100] * 3, 0, lossless=True,
+                               watermark=core._wm.make_payload(payload_text, frames, [100] * 3))
+            elif fmt == "PNG":
+                stego = core._wm.embed_lsb(frames[0], core._wm.make_payload(payload_text, frames))
+                stego.save(str(path), "PNG",
+                           **core._wm.metadata_for("PNG", core._wm.make_payload(payload_text, frames)))
+            elif fmt == "BMP":
+                stego = core._wm.embed_lsb(frames[0].convert("RGB"), core._wm.make_payload(payload_text, frames))
+                stego.save(str(path), "BMP")
+            else:
+                core.flatten_to_rgb(frames[0]).save(
+                    str(path), "JPEG",
+                    **core._wm.metadata_for("JPEG", core._wm.make_payload(payload_text, frames)))
+            info = core._wm.read_watermark(path)
+            self.assertIsNotNone(info, f"{fmt} 读不到水印")
+            self.assertEqual(info["text"], payload_text, f"{fmt} 水印内容不对")
+
+    def test_plain_image_has_no_watermark(self):
+        path = self.tmp / "plain.png"
+        self._frames(1)[0].save(path)
+        self.assertIsNone(core._wm.read_watermark(path))
 
 
 if __name__ == "__main__":

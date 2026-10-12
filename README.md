@@ -12,7 +12,7 @@
   <img src="ui_en.png" width="49%" alt="English UI">
 </p>
 
-`v2.2.0` · Python 3.8+
+`v2.3.0` · Python 3.8+
 
 ---
 
@@ -74,6 +74,21 @@ mirror-symmetry --selftest       :: 无界面自检，写出 selftest_report.txt
 - 导出动画 **GIF** 或动画 **WebP**（动画 WebP 无损，无残影、通常比 GIF 小很多）
 - 存 PNG / JPG / BMP 时只存当前帧，并明确提示
 
+**隐藏水印（不可见）**
+
+导出的图片可以自动写入一段肉眼看不见的水印，用来标记这张图的来源：
+
+| 格式 | 载体 | 说明 |
+| --- | --- | --- |
+| PNG / BMP / 无损 WebP | 像素最低位（LSB） | 每个像素 R/G/B 最低位各藏 1 bit，肉眼完全看不出（每通道最多差 1） |
+| GIF | 注释块 | 调色板格式改像素会掉色，所以走元数据 |
+| JPEG / 有损 WebP | 元数据（COM / XMP） | 有损压缩会破坏像素水印 |
+
+- 水印内容形如 `MSW1|文字|时间|宽x高x帧数|内容指纹|CRC`，带 CRC 校验，改一个字符就会被判定为无效
+- 默认文字是 `merisk.top`，可在「导出设置 → 水印文字」里随便改
+- 菜单 `⋯` → **读取隐藏水印…** 选一张图就能把水印读出来验证
+- 不想写水印就把「添加隐藏水印」开关关掉
+
 **批量处理**：选一个文件夹按当前设置全部处理，带进度窗口；
 动图出动画 GIF，静态图出 PNG。
 
@@ -115,9 +130,10 @@ mirror-symmetry --selftest       :: 无界面自检，写出 selftest_report.txt
 │  ├─ ui.py                    现代 Tkinter 界面 + 入口 + 自检
 │  ├─ theme.py                 配色 / ttk 主题 / 程序图标（随语言调字号）
 │  ├─ i18n.py                  中英文案表
+│  ├─ watermark.py             隐藏水印：像素最低位 + 元数据两种载体
 │  ├─ config.py                设置持久化（%APPDATA%）
 │  └─ __main__.py              python -m mirror_symmetry
-├─ tests/test_core.py          15 组单元测试（像素级对称 + 动图往返 + 轴居中 + 尺寸）
+├─ tests/test_core.py          19 组单元测试（像素级对称 + 动图往返 + 轴居中 + 尺寸 + 隐藏水印）
 ├─ scripts/build_exe.py        一键打包 exe
 ├─ scripts/entry.py            PyInstaller 入口
 ├─ mirror_symmetry.py          兼容入口（python mirror_symmetry.py）
@@ -129,7 +145,7 @@ mirror-symmetry --selftest       :: 无界面自检，写出 selftest_report.txt
 
 ```bat
 python -m pip install -e .[dev]
-python -m unittest discover -s tests     :: 15 组测试
+python -m unittest discover -s tests     :: 19 组测试
 python mirror_symmetry.py --selftest     :: 快速自检
 
 python -m pip install -e .[build]        :: 装 PyInstaller
