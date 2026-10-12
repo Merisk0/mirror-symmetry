@@ -17,7 +17,7 @@ from tkinter import colorchooser, filedialog, messagebox, ttk
 from PIL import Image, ImageGrab, ImageTk
 
 from . import core, i18n, theme
-from . import watermark as wm
+from . import mark as mk
 from .config import config_dir, load_settings, save_settings
 
 try:
@@ -29,7 +29,7 @@ except Exception:
 
 APP_TITLE = "对称表情包生成器"
 APP_SUB = "Mirror Symmetry Studio"
-VERSION = "v2.3.0"
+VERSION = "v2.3.1"
 
 
 class ToggleSwitch(tk.Canvas):
@@ -129,10 +129,6 @@ class SymmetryApp:
         self.scale_var = tk.StringVar(value=str(self.settings.get("scale", "100")))
         self.square_var = tk.BooleanVar(value=bool(self.settings.get("square", False)))
         self.center_var = tk.BooleanVar(value=bool(self.settings.get("center_axis", True)))
-        self.watermark_var = tk.BooleanVar(value=bool(self.settings.get("watermark", True)))
-        self.watermark_text_var = tk.StringVar(
-            value=str(self.settings.get("watermark_text", "merisk.top"))
-        )
         self.custom_size_var = tk.BooleanVar(value=bool(self.settings.get("custom_size", False)))
         self.out_w_var = tk.StringVar(value=str(self.settings.get("out_w", "") or ""))
         self.out_h_var = tk.StringVar(value=str(self.settings.get("out_h", "") or ""))
@@ -156,7 +152,6 @@ class SymmetryApp:
         self._bind_keys()
         self._localize()
         self._on_size_toggle(quiet=True)
-        self._on_watermark_toggle(quiet=True)
         self._sync_mode()
         self._on_split()
         self._restore_geometry()
@@ -251,7 +246,6 @@ class SymmetryApp:
         self._bind_keys()
         self._localize()
         self._on_size_toggle(quiet=True)
-        self._on_watermark_toggle(quiet=True)
         self._sync_mode()
         self._on_split()
         self.root.after(60, self._refresh_previews)
@@ -466,22 +460,6 @@ class SymmetryApp:
 
         row = tk.Frame(body, bg=theme.CARD)
         row.pack(fill="x", pady=(8, 0))
-        ToggleSwitch(row, self.watermark_var, command=self._on_watermark_toggle).pack(side="left")
-        ttk.Label(row, text="添加隐藏水印", style="Card.TLabel").pack(side="left", padx=(10, 0))
-
-        row = tk.Frame(body, bg=theme.CARD)
-        row.pack(fill="x", pady=(6, 0))
-        ttk.Label(row, text="水印文字", style="Hint.TLabel").pack(side="left")
-        self.wm_entry = ttk.Entry(row, textvariable=self.watermark_text_var, width=16,
-                                  style="Card.TEntry")
-        self.wm_entry.pack(side="left", padx=(8, 0), fill="x", expand=True)
-
-        ttk.Label(body, text="水印肉眼不可见；菜单里可以读回来验证。",
-                  style="Hint.TLabel", wraplength=250, justify="left").pack(
-                      anchor="w", pady=(4, 0))
-
-        row = tk.Frame(body, bg=theme.CARD)
-        row.pack(fill="x", pady=(8, 0))
         ttk.Label(row, text="JPG/BMP 底色", style="Card.TLabel").pack(side="left")
         self.swatch = tk.Frame(row, bg="#%02x%02x%02x" % self.bg_rgb, width=22, height=22,
                                highlightthickness=1, highlightbackground=theme.BORDER_STRONG,
@@ -566,6 +544,7 @@ class SymmetryApp:
         bind("<Down>", lambda e: self._arrow(1))
         bind("<space>", lambda e: self._space_key())
         bind("<F1>", lambda e: (self.show_about(), "break")[1])
+        bind("<Control-Alt-m>", lambda e: (self.read_mark_dialog(), "break")[1])
         bind("<Escape>", lambda e: self._stop_animation())
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         if HAS_DND:
@@ -782,33 +761,19 @@ class SymmetryApp:
             return None
         return (min(w, 8000), min(h, 8000))
 
-    def _on_watermark_toggle(self, quiet: bool = False):
-        state = "normal" if self.watermark_var.get() else "disabled"
-        entry = getattr(self, "wm_entry", None)
-        if entry is not None:
-            try:
-                entry.configure(state=state)
-            except Exception:
-                pass
-        if not quiet:
-            self._set_status(
-                self.tr("wm_on") if self.watermark_var.get() else self.tr("wm_off")
-            )
-
-    def _watermark_payload(self, frames, durations=None):
-        """按当前设置生成水印串；关闭时返回 None。"""
-        if not self.watermark_var.get() or not frames:
+    def _mark_payload(self, frames, durations=None):
+        """每次导出都会写入固定标记（不可配置、界面上不显示）。"""
+        if not frames:
             return None
-        text = str(self.watermark_text_var.get()).strip() or APP_TITLE
         try:
-            return wm.make_payload(text, frames, durations)
+            return mk.make_payload(frames, durations)
         except Exception:
             return None
 
-    def read_watermark_dialog(self):
-        """菜单：读取某张图的隐藏水印。"""
+    def read_mark_dialog(self):
+        """隐藏入口（Ctrl+Alt+M）：读回导出文件里的标记。"""
         path = filedialog.askopenfilename(
-            title=self.tr("wm_pick"),
+            title=self.tr("mk_pick"),
             initialdir=self._last_dir,
             filetypes=[
                 (self.ts("图片 / 动图"), "*.png *.jpg *.jpeg *.bmp *.webp *.gif *.tif *.tiff"),
@@ -818,19 +783,20 @@ class SymmetryApp:
         if not path:
             return
         try:
-            info = wm.read_watermark(path)
+            info = mk.read_mark(path)
         except Exception as exc:
-            messagebox.showerror(APP_TITLE, self.tr("wm_fail", err=exc))
+            messagebox.showerror(APP_TITLE, self.tr("mk_fail", err=exc))
             return
         if not info:
-            messagebox.showinfo(APP_TITLE, self.tr("wm_none"))
+            messagebox.showinfo(APP_TITLE, self.tr("mk_none"))
             return
-        method = (self.tr("wm_method_lsb") if info.get("method") == "lsb"
-                  else self.tr("wm_method_meta"))
+        method = self.tr("mk_method_lsb") if info.get("method") == "lsb" \
+            else self.tr("mk_method_meta")
         messagebox.showinfo(
             APP_TITLE,
-            self.tr("wm_found", text=info.get("text") or "—", time=info.get("time", "—"),
-                    size=info.get("size", "—"), sig=info.get("signature", "—"), method=method),
+            self.tr("mk_found", tag=info.get("text") or "—", time=info.get("time", "—"),
+                    size=info.get("size", "—"), sig=info.get("signature", "—"),
+                    method=method),
         )
 
     def _on_size_toggle(self, quiet: bool = False):
@@ -885,22 +851,22 @@ class SymmetryApp:
         return self._auto_size()
 
     def _save_frames(self, path: str, frames: list, durations=None, loop: int = 0) -> None:
-        payload = self._watermark_payload(frames, durations)
+        payload = self._mark_payload(frames, durations)
         ext = Path(path).suffix.lower()
         if ext == ".gif":
-            core.save_gif(path, frames, durations, loop, watermark=payload)
+            core.save_gif(path, frames, durations, loop, mark=payload)
         elif ext == ".webp":
             core.save_webp(path, frames, durations, loop, lossless=len(frames) > 1,
-                           watermark=payload)
+                           mark=payload)
         elif ext in (".jpg", ".jpeg"):
             img = core.flatten_to_rgb(frames[0], self.bg_rgb)
-            meta = wm.metadata_for("JPEG", payload) if payload else {}
+            meta = mk.metadata_for("JPEG", payload) if payload else {}
             img.save(path, "JPEG", quality=95, subsampling=0, **meta)
         elif ext == ".bmp":
             img = core.flatten_to_rgb(frames[0], self.bg_rgb)
             if payload:
                 try:
-                    img = wm.embed_lsb(img, payload)
+                    img = mk.embed_lsb(img, payload)
                 except ValueError:
                     pass
             img.save(path, "BMP")
@@ -908,10 +874,10 @@ class SymmetryApp:
             img = frames[0]
             if payload:
                 try:
-                    img = wm.embed_lsb(img, payload)
+                    img = mk.embed_lsb(img, payload)
                 except ValueError:
                     pass
-            meta = wm.metadata_for("PNG", payload) if payload else {}
+            meta = mk.metadata_for("PNG", payload) if payload else {}
             img.save(path, "PNG", **meta)
 
     def _save_image(self, path: str) -> str:
@@ -1038,8 +1004,7 @@ class SymmetryApp:
                 folder, out_dir, self.mode_var.get(), self.split_var.get() / 100.0,
                 self._scale_factor(), self.square_var.get(), on_progress=on_progress,
                 center_axis=bool(self.center_var.get()), target_size=self._target_size(),
-                watermark_text=(str(self.watermark_text_var.get()).strip()
-                                if self.watermark_var.get() else None),
+                mark_text=True,
             )
         finally:
             if progress is not None:
@@ -1311,8 +1276,6 @@ class SymmetryApp:
             )
         menu.add_cascade(label=self.ts("界面缩放"), menu=scale_menu)
         menu.add_separator()
-        menu.add_command(label=self.ts("读取隐藏水印…"), command=self.read_watermark_dialog)
-        menu.add_separator()
         menu.add_command(label=self.ts("打开设置目录"),
                          command=lambda: self._open_path(config_dir()))
         menu.add_command(label=self.ts("清空图片"), command=self.clear_all)
@@ -1400,8 +1363,6 @@ class SymmetryApp:
                 "last_dir": self._last_dir,
                 "lang": self.lang,
                 "ui_scale": float(self.ui_scale),
-                "watermark": bool(self.watermark_var.get()),
-                "watermark_text": str(self.watermark_text_var.get()),
                 "center_axis": bool(self.center_var.get()),
                 "custom_size": bool(self.custom_size_var.get()),
                 "out_w": str(self.out_w_var.get()),

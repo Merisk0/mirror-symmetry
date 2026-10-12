@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mirror-symmetry"
-version = "2.3.0"
+version = "2.3.1"
 description = "对称表情包生成器 —— 把图片 / GIF 从中间镜像成对称图"
 readme = "README.md"
 requires-python = ">=3.8"

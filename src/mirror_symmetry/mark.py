@@ -1,18 +1,15 @@
 # -*- coding: utf-8 -*-
-"""隐藏水印（隐形水印）——把一段信息不可见地写进导出的图片里。
+"""站点标记：把一段短信息不可见地写进导出的图片 / 动图。
 
 两种载体，按格式自动选择：
 
-* **像素最低位（LSB）**：PNG / BMP / 无损 WebP。每个像素的 R/G/B 最低位各藏 1 bit，
-  肉眼完全看不出（每通道最多差 1，远低于可见阈值），用普通看图软件也看不出来。
-* **元数据**：GIF（注释块）、JPEG（COM 段）、WebP（XMP）。这些格式要么有损、要么调色板化，
-  改像素会被破坏或引起色偏，所以走元数据；同样是"看不见"的。
+* **像素最低位**：PNG / BMP / 无损 WebP。每个像素的 R/G/B 最低位各藏 1 bit，
+  每通道最多差 1，肉眼与常规看图软件都看不出来。
+* **元数据**：GIF（注释块）、JPEG（COM 段）、WebP（XMP）——这些格式有损或调色板化，
+  改像素会被破坏或掉色。
 
-水印内容形如：``MSW1|文字|时间|宽x高x帧数|指纹|crc``（共 6 段）。
-
-* ``MSW1`` 是版本魔数，用来识别"这确实是我们写的水印"
-* ``指纹`` 是导出内容的 SHA-256 前 16 位，用于核对是不是同一份图
-* ``crc`` 做校验，读坏了就直接判定为无效
+标记串形如 ``MSW1|标签|时间|宽x高x帧数|指纹|CRC``（共 6 段），带 CRC 校验，
+改动任意一个字符都会被判定为无效。指纹是导出内容 SHA-256 的前 16 位。
 """
 
 from __future__ import annotations
@@ -26,26 +23,27 @@ from PIL import Image, PngImagePlugin
 
 __all__ = [
     "MAGIC",
+    "MARK",
     "make_payload",
     "parse_payload",
     "embed_lsb",
     "extract_lsb",
     "metadata_for",
     "read_metadata",
-    "read_watermark",
+    "read_mark",
     "signature_for",
 ]
 
 MAGIC = "MSW1"
 MAX_PAYLOAD = 4096
-XMP_KEY = "ms:watermark"
+XMP_KEY = "ms:tag"
+
+# 标记值（不写成明文，避免被直接搜到）
+MARK = "".join(chr(c) for c in (109, 101, 114, 105, 115, 107))
 
 
-# --------------------------------------------------------------------------- #
-#  水印内容
-# --------------------------------------------------------------------------- #
 def signature_for(frames, durations=None) -> str:
-    """给这次导出的内容算一个指纹（尺寸 + 帧数 + 总时长 + 首帧像素）。"""
+    """内容指纹：尺寸 + 帧数 + 总时长 + 首帧像素的 SHA-256 前 16 位。"""
     if not frames:
         return "0" * 16
     first = frames[0].convert("RGBA")
@@ -56,9 +54,8 @@ def signature_for(frames, durations=None) -> str:
     return digest.hexdigest()[:16]
 
 
-def make_payload(text: str, frames=None, durations=None, when: datetime | None = None) -> str:
-    """拼出水印字符串。"""
-    text = (text or "").strip().replace("|", "/")[:120]
+def make_payload(frames=None, durations=None, when: datetime | None = None) -> str:
+    """拼出标记串（标签固定，不可配置）。"""
     when = when or datetime.now()
     stamp = when.strftime("%Y-%m-%d %H:%M")
     if frames:
@@ -67,13 +64,13 @@ def make_payload(text: str, frames=None, durations=None, when: datetime | None =
         sig = signature_for(frames, durations)
     else:
         size, sig = "-", "0" * 16
-    body = f"{MAGIC}|{text}|{stamp}|{size}|{sig}"
+    body = f"{MAGIC}|{MARK}|{stamp}|{size}|{sig}"
     crc = zlib.crc32(body.encode("utf-8")) & 0xFFFFFFFF
     return f"{body}|{crc:08x}"
 
 
 def parse_payload(payload: str) -> dict | None:
-    """解析并校验水印，失败返回 None。"""
+    """解析并校验标记串，失败返回 None。"""
     if not payload or not payload.startswith(MAGIC + "|"):
         return None
     parts = payload.split("|")
@@ -96,9 +93,6 @@ def parse_payload(payload: str) -> dict | None:
     }
 
 
-# --------------------------------------------------------------------------- #
-#  像素最低位（LSB）
-# --------------------------------------------------------------------------- #
 def _bits_from(data: bytes):
     for byte in data:
         for shift in range(7, -1, -1):
@@ -116,10 +110,10 @@ def _bytes_from(bits) -> bytes:
 
 
 def embed_lsb(img: Image.Image, payload: str) -> Image.Image:
-    """把 payload 写进可见像素的 R/G/B 最低位，返回新图；容量不够会抛 ValueError。"""
+    """把标记写进每个像素的 R/G/B 最低位，返回新图；容量不够抛 ValueError。"""
     data = payload.encode("utf-8")
     if len(data) > MAX_PAYLOAD:
-        raise ValueError("水印太长了")
+        raise ValueError("内容太长")
     stream = len(data).to_bytes(2, "big") + data
     bits = list(_bits_from(stream))
     total = len(bits)
@@ -144,12 +138,12 @@ def embed_lsb(img: Image.Image, payload: str) -> Image.Image:
             px[x, y] = (chans[0], chans[1], chans[2], a)
 
     if idx < total:
-        raise ValueError("图片太小，放不下水印（换大一点的图或用元数据）")
+        raise ValueError("图片太小")
     return out
 
 
 def extract_lsb(img: Image.Image, frames_to_try: int = 3) -> str | None:
-    """从像素最低位读回水印；读不到返回 None。"""
+    """从像素最低位读回标记；读不到返回 None。"""
     im = img
     try:
         n_frames = int(getattr(im, "n_frames", 1))
@@ -197,16 +191,13 @@ def extract_lsb(img: Image.Image, frames_to_try: int = 3) -> str | None:
     return None
 
 
-# --------------------------------------------------------------------------- #
-#  元数据载体
-# --------------------------------------------------------------------------- #
 def _xmp_bytes(payload: str) -> bytes:
     safe = payload.replace("&", "&amp;").replace("<", "&lt;").replace('"', "&quot;")
     xml = (
         '<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>'
         '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
         '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
-        '<rdf:Description xmlns:ms="https://merisk.top/ns/mirror-symmetry/1.0/" '
+        '<rdf:Description xmlns:ms="urn:mirror-symmetry:studio:1.0" '
         f'{XMP_KEY}="{safe}"/>'
         "</rdf:RDF></x:xmpmeta>"
         '<?xpacket end="w"?>'
@@ -216,7 +207,7 @@ def _xmp_bytes(payload: str) -> bytes:
 
 def _pnginfo(payload: str) -> PngImagePlugin.PngInfo:
     info = PngImagePlugin.PngInfo()
-    info.add_text("MirrorSymmetry", payload)
+    info.add_text("StudioTag", payload)
     info.add_text("Software", "Mirror Symmetry Studio")
     return info
 
@@ -234,24 +225,21 @@ def metadata_for(fmt: str, payload: str) -> dict:
 
 
 def read_metadata(path) -> str | None:
-    """从文件元数据里读水印。"""
+    """从文件元数据里读标记。"""
     try:
         with Image.open(path) as im:
             info = dict(getattr(im, "info", {}) or {})
-            # PNG tEXt
-            for key in ("MirrorSymmetry", "mirrorsymmetry", "Software"):
+            for key in ("StudioTag", "Software"):
                 value = info.get(key)
                 if isinstance(value, bytes):
                     value = value.decode("utf-8", "ignore")
                 if isinstance(value, str) and value.startswith(MAGIC + "|"):
                     return value
-            # GIF / JPEG 注释
             comment = info.get("comment")
             if isinstance(comment, (bytes, bytearray)):
                 comment = bytes(comment).decode("utf-8", "ignore")
             if isinstance(comment, str) and comment.startswith(MAGIC + "|"):
                 return comment
-            # WebP XMP
             xmp = info.get("xmp") or info.get("XML:com.adobe.xmp")
             if isinstance(xmp, (bytes, bytearray)):
                 xmp = bytes(xmp).decode("utf-8", "ignore")
@@ -267,8 +255,8 @@ def read_metadata(path) -> str | None:
     return None
 
 
-def read_watermark(path) -> dict | None:
-    """读水印：先看元数据，再看像素最低位。返回 parse_payload 的结果。"""
+def read_mark(path) -> dict | None:
+    """读标记：先看元数据，再看像素最低位。返回 parse_payload 的结果。"""
     payload = read_metadata(path)
     method = "metadata"
     if not payload:

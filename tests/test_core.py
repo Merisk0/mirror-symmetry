@@ -234,8 +234,8 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(gif_out.n_frames, 3)
 
 
-class TestWatermark(unittest.TestCase):
-    """隐藏水印：不可见 + 能读回 + 篡改可检出。"""
+class TestMark(unittest.TestCase):
+    """文件标记：不可见 + 能读回 + 篡改可检出。"""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="mswm_"))
@@ -245,55 +245,55 @@ class TestWatermark(unittest.TestCase):
 
     def test_payload_roundtrip_and_tamper(self):
         frames = self._frames()
-        payload = core._wm.make_payload("merisk.top", frames, [100] * len(frames))
-        info = core._wm.parse_payload(payload)
+        payload = core._mark.make_payload(frames, [100] * len(frames))
+        info = core._mark.parse_payload(payload)
         self.assertIsNotNone(info)
-        self.assertEqual(info["text"], "merisk.top")
+        self.assertEqual(info["text"], core._mark.MARK)
         broken = payload[:-1] + ("0" if payload[-1] != "0" else "1")
-        self.assertIsNone(core._wm.parse_payload(broken))
+        self.assertIsNone(core._mark.parse_payload(broken))
 
     def test_lsb_is_invisible(self):
         frames = self._frames(1)
-        payload = core._wm.make_payload("merisk.top", frames)
-        stego = core._wm.embed_lsb(frames[0], payload)
+        payload = core._mark.make_payload(frames)
+        stego = core._mark.embed_lsb(frames[0], payload)
         diff = ImageChops.difference(stego.convert("RGBA"), frames[0].convert("RGBA"))
         hist = diff.histogram()
         worst = max(i for i in range(256) for c in range(4) if hist[c * 256 + i])
         self.assertLessEqual(worst, 1)
-        self.assertEqual(core._wm.extract_lsb(stego), payload)
+        self.assertEqual(core._mark.extract_lsb(stego), payload)
 
-    def test_formats_carry_watermark(self):
+    def test_formats_carry_mark(self):
         frames = self._frames(3)
-        payload_text = "merisk.top"
+        payload_text = core._mark.MARK
         cases = [(".png", "PNG"), (".bmp", "BMP"), (".gif", "GIF"),
                  (".jpg", "JPEG"), (".webp", "WEBP")]
         for ext, fmt in cases:
             path = self.tmp / f"wm{ext}"
             if fmt == "GIF":
                 core.save_gif(str(path), frames, [100] * 3, 0,
-                              watermark=core._wm.make_payload(payload_text, frames, [100] * 3))
+                              mark=core._mark.make_payload(frames, [100] * 3))
             elif fmt == "WEBP":
                 core.save_webp(str(path), frames, [100] * 3, 0, lossless=True,
-                               watermark=core._wm.make_payload(payload_text, frames, [100] * 3))
+                               mark=core._mark.make_payload(frames, [100] * 3))
             elif fmt == "PNG":
-                stego = core._wm.embed_lsb(frames[0], core._wm.make_payload(payload_text, frames))
+                stego = core._mark.embed_lsb(frames[0], core._mark.make_payload(frames))
                 stego.save(str(path), "PNG",
-                           **core._wm.metadata_for("PNG", core._wm.make_payload(payload_text, frames)))
+                           **core._mark.metadata_for("PNG", core._mark.make_payload(frames)))
             elif fmt == "BMP":
-                stego = core._wm.embed_lsb(frames[0].convert("RGB"), core._wm.make_payload(payload_text, frames))
+                stego = core._mark.embed_lsb(frames[0].convert("RGB"), core._mark.make_payload(frames))
                 stego.save(str(path), "BMP")
             else:
                 core.flatten_to_rgb(frames[0]).save(
                     str(path), "JPEG",
-                    **core._wm.metadata_for("JPEG", core._wm.make_payload(payload_text, frames)))
-            info = core._wm.read_watermark(path)
-            self.assertIsNotNone(info, f"{fmt} 读不到水印")
-            self.assertEqual(info["text"], payload_text, f"{fmt} 水印内容不对")
+                    **core._mark.metadata_for("JPEG", core._mark.make_payload(frames)))
+            info = core._mark.read_mark(path)
+            self.assertIsNotNone(info, f"{fmt} 读不到标记")
+            self.assertEqual(info["text"], payload_text, f"{fmt} 标记内容不对")
 
-    def test_plain_image_has_no_watermark(self):
+    def test_plain_image_has_no_mark(self):
         path = self.tmp / "plain.png"
         self._frames(1)[0].save(path)
-        self.assertIsNone(core._wm.read_watermark(path))
+        self.assertIsNone(core._mark.read_mark(path))
 
 
 if __name__ == "__main__":

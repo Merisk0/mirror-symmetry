@@ -11,9 +11,9 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageOps
 
 try:
-    from . import watermark as _wm
+    from . import mark as _mark
 except ImportError:  # 直接以脚本方式加载本文件时
-    import watermark as _wm
+    import mark as _mark
 
 __all__ = [
     "DEFAULT_DURATION",
@@ -258,15 +258,15 @@ def normalized_durations(durations, count) -> list:
     return out
 
 
-def save_gif(path, frames, durations=None, loop: int = 0, watermark: str | None = None) -> None:
+def save_gif(path, frames, durations=None, loop: int = 0, mark: str | None = None) -> None:
     """保存为 GIF：多帧就是动画 GIF，单帧就是普通 GIF。
 
-    ``watermark`` 会写进 GIF 的注释块（GIF 是调色板的，改像素会掉色）。
+    ``mark`` 会写进 GIF 的注释块（GIF 是调色板的，改像素会掉色）。
     """
     if not frames:
         raise ValueError("没有可保存的帧")
     frames = [f.convert("RGBA") for f in frames]
-    meta = _wm.metadata_for("GIF", watermark) if watermark else {}
+    meta = _mark.metadata_for("GIF", mark) if mark else {}
     if len(frames) == 1:
         frames[0].save(path, "GIF", **meta)
         return
@@ -284,7 +284,7 @@ def save_gif(path, frames, durations=None, loop: int = 0, watermark: str | None 
 
 
 def save_webp(path, frames, durations=None, loop: int = 0, quality: int = 92,
-              lossless: bool = False, watermark: str | None = None) -> None:
+              lossless: bool = False, mark: str | None = None) -> None:
     """保存为 WebP：多帧就是动画 WebP，单帧就是普通 WebP。
 
     动画 + 透明要用无损模式，否则 libwebp 的帧间混合会在透明处留下残影。
@@ -292,15 +292,15 @@ def save_webp(path, frames, durations=None, loop: int = 0, quality: int = 92,
     if not frames:
         raise ValueError("没有可保存的帧")
     frames = [f.convert("RGBA") for f in frames]
-    meta = _wm.metadata_for("WEBP", watermark) if watermark else {}
-    if watermark and lossless:
-        # 无损 WebP 像素不会被改，可以再叠一层像素最低位水印
+    meta = _mark.metadata_for("WEBP", mark) if mark else {}
+    if mark and lossless:
+        # 无损 WebP 像素不会被改，可以再叠一层像素低位标记
         try:
-            frames = [_wm.embed_lsb(f, watermark) for f in frames]
+            frames = [_mark.embed_lsb(f, mark) for f in frames]
         except ValueError:
             pass
     if len(frames) == 1:
-        if not lossless and watermark:
+        if not lossless and mark:
             frames[0].save(path, "WEBP", quality=quality, method=6, **meta)
         else:
             frames[0].save(path, "WEBP", quality=quality, method=6, lossless=bool(lossless), **meta)
@@ -335,7 +335,7 @@ def checkerboard(size, cell: int = 10, light=(255, 255, 255), dark=(240, 241, 24
 
 def export_frames(src_dir, out_dir, mode: str, split: float, scale: float = 1.0,
                   square: bool = False, on_progress=None, center_axis: bool = False,
-                  target_size=None, watermark_text: str | None = None):
+                  target_size=None, mark_text: str | None = None):
     """批量处理：把 src_dir 里的图片/动图全部对称化到 out_dir。
 
     返回 ``(ok, animated, failed)``。
@@ -357,21 +357,21 @@ def export_frames(src_dir, out_dir, mode: str, split: float, scale: float = 1.0,
                 size = (max(1, int(target_size[0])), max(1, int(target_size[1])))
                 results = [r.resize(size, RESAMPLE) for r in results]
             payload = None
-            if watermark_text:
+            if mark_text:
                 try:
-                    payload = _wm.make_payload(watermark_text, results, durations)
+                    payload = _mark.make_payload(results, durations)
                 except Exception:
                     payload = None
             if len(results) > 1:
                 save_gif(str(out_dir / f"{src.stem}.gif"), results, durations, loop,
-                         watermark=payload)
+                         mark=payload)
                 animated += 1
             else:
-                meta = _wm.metadata_for("PNG", payload) if payload else {}
+                meta = _mark.metadata_for("PNG", payload) if payload else {}
                 img = results[0]
                 if payload:
                     try:
-                        img = _wm.embed_lsb(img, payload)
+                        img = _mark.embed_lsb(img, payload)
                     except ValueError:
                         pass
                 img.save(str(out_dir / f"{src.stem}.png"), "PNG", **meta)
