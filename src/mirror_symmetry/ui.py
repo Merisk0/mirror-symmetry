@@ -29,7 +29,7 @@ except Exception:
 
 APP_TITLE = "对称表情包生成器"
 APP_SUB = "Mirror Symmetry Studio"
-VERSION = "v2.3.1"
+VERSION = "v2.3.2"
 
 
 class ToggleSwitch(tk.Canvas):
@@ -278,8 +278,10 @@ class SymmetryApp:
         left = tk.Frame(bar, bg=theme.CARD)
         left.pack(side="left", padx=(18, 0), pady=13)
         self._icon_photo = self._make_icon_photo(30)
+        self.logo_label = None
         if self._icon_photo is not None:
-            tk.Label(left, image=self._icon_photo, bg=theme.CARD).pack(side="left", padx=(0, 10))
+            self.logo_label = tk.Label(left, image=self._icon_photo, bg=theme.CARD)
+            self.logo_label.pack(side="left", padx=(0, 10))
         titles = tk.Frame(left, bg=theme.CARD)
         titles.pack(side="left")
         ttk.Label(titles, text=APP_TITLE, style="BarTitle.TLabel").pack(anchor="w")
@@ -517,7 +519,8 @@ class SymmetryApp:
                        height=32 + int(self.fonts.get("size_small", 9)))
         bar.pack(fill="x")
         bar.pack_propagate(False)
-        self.status_dot = tk.Canvas(bar, width=10, height=10, bg=theme.BG, highlightthickness=0)
+        self.status_dot = tk.Canvas(bar, width=10, height=10, bg=theme.BG,
+                                    highlightthickness=0, cursor="arrow")
         self.status_dot.pack(side="left", padx=(18, 8), pady=10)
         self.status_dot.create_oval(1, 1, 9, 9, fill=theme.SUCCESS, outline="")
         ttk.Label(bar, textvariable=self.status_var, style="Status.TLabel").pack(
@@ -544,7 +547,18 @@ class SymmetryApp:
         bind("<Down>", lambda e: self._arrow(1))
         bind("<space>", lambda e: self._space_key())
         bind("<F1>", lambda e: (self.show_about(), "break")[1])
+        # 查看标记：键盘兜底（手动判断修饰键，Windows 下 Ctrl+Alt 的自动匹配不可靠）
+        bind("<Control-Shift-m>", lambda e: (self.read_mark_dialog(), "break")[1])
+        bind("<Control-Shift-M>", lambda e: (self.read_mark_dialog(), "break")[1])
         bind("<Control-Alt-m>", lambda e: (self.read_mark_dialog(), "break")[1])
+        self.root.bind_all("<KeyPress>", self._hotkey_watch, add="+")
+        # 鼠标入口（不依赖修饰键，最稳）
+        for widget in (getattr(self, "logo_label", None), getattr(self, "status_dot", None)):
+            if widget is not None:
+                widget.bind("<Double-Button-1>",
+                            lambda e: (self.read_mark_dialog(), "break")[1])
+                widget.bind("<Triple-Button-1>",
+                            lambda e: (self.read_mark_dialog(), "break")[1])
         bind("<Escape>", lambda e: self._stop_animation())
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         if HAS_DND:
@@ -769,6 +783,22 @@ class SymmetryApp:
             return mk.make_payload(frames, durations)
         except Exception:
             return None
+
+    def _hotkey_watch(self, event):
+        """兜底：手动判断 Ctrl+M / Ctrl+Shift+M / Ctrl+Alt+M，避免依赖 Tk 的修饰符匹配。"""
+        try:
+            keysym = str(getattr(event, "keysym", "")).lower()
+            state = int(getattr(event, "state", 0))
+        except Exception:
+            return
+        if keysym != "m":
+            return
+        ctrl = bool(state & 0x0004)
+        shift = bool(state & 0x0001)
+        alt = bool(state & 0x20000) or bool(state & 0x0008) or bool(state & 0x0002)
+        if ctrl and (alt or shift):
+            self.read_mark_dialog()
+            return "break"
 
     def read_mark_dialog(self):
         """隐藏入口（Ctrl+Alt+M）：读回导出文件里的标记。"""

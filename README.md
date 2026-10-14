@@ -12,7 +12,7 @@
   <img src="ui_en.png" width="49%" alt="English UI">
 </p>
 
-`v2.3.1` · Python 3.8+
+`v2.3.2` · Python 3.8+
 
 ---
 
